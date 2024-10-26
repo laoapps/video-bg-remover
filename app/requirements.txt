@@ -1,2 +1,5 @@
 opencv-python
 tensorflow
+Flask
+flask-socketio
+eventlet
