@@ -79,4 +79,4 @@ def handle_process_frame(data):
     emit('processed_frame', buffer.tobytes())
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('MY_PASS') or 34565))
