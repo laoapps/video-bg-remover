@@ -6,7 +6,6 @@ RUN apt-get update && \
     apt-get install -y ffmpeg libsm6 libxext6 && \
     rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
 WORKDIR /app
 
 # Copy and install Python dependencies
@@ -19,5 +18,5 @@ COPY app/ /app
 # Expose the app port
 EXPOSE 5000
 
-# Define the entry point for the app
-CMD ["python", "main.py"]
+# Start Gunicorn with Flask-SocketIO for WebSocket support
+CMD ["gunicorn", "-w", "2", "-k", "eventlet", "-b", "0.0.0.0:5000", "main:app"]
