@@ -1,82 +1,73 @@
 # app/main.py
+from flask import Flask, request, jsonify, send_from_directory
 import os
 import cv2
-import numpy as np
-from flask import Flask, request, jsonify, send_from_directory
-from flask_socketio import SocketIO, emit
+import time
+import threading
+from datetime import datetime, timedelta
 from background_removal import load_model, remove_background
 
 app = Flask(__name__)
-socketio = SocketIO(app)
 model = load_model()
+output_dir = 'output/frames'
+os.makedirs(output_dir, exist_ok=True)
 
-# Limits
-MAX_VIDEO_DURATION = 10  # seconds for file processing
-MAX_FRAME_DURATION = 0.5  # seconds for each real-time frame
+# Start a cleanup thread to delete old files every 5 minutes
+def start_cleanup_task():
+    def cleanup_old_files():
+        while True:
+            # Check for files older than 5 minutes
+            now = datetime.now()
+            for filename in os.listdir(output_dir):
+                file_path = os.path.join(output_dir, filename)
+                if os.path.isfile(file_path):
+                    file_modified_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                    if now - file_modified_time > timedelta(minutes=5):
+                        os.remove(file_path)
+            time.sleep(300)  # Wait 5 minutes before checking again
 
-# HTTP endpoint for file processing
+    # Start the cleanup thread
+    cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
+    cleanup_thread.start()
+
+# Call the cleanup function to start it when the app runs
+start_cleanup_task()
+
+# Endpoint for file processing with optional transparent background
 @app.route('/process_file', methods=['POST'])
 def process_file():
     file = request.files.get('file')
-    background_color = request.form.get('background_color', '#FFFFFF')  # Default to white if not provided
+    transparent = request.form.get('transparent', 'false').lower() == 'true'
 
     if not file:
         return jsonify({'error': 'No file provided'}), 400
 
-    # Save input file
-    input_path = os.path.join('input', 'input_video.mp4')
+    # Save input file (expects MOV format for compatibility with prores_4444 codec)
+    input_path = os.path.join('input', 'input_video.mov')
     file.save(input_path)
 
-    # Process video file
-    output_path = os.path.join('output', 'output_video.mp4')
-    if process_video(input_path, output_path, background_color=background_color, max_duration=MAX_VIDEO_DURATION):
-        return send_from_directory(directory='output', filename='output_video.mp4')
-    else:
-        return jsonify({'error': 'Video too long. Max duration is 10 seconds.'}), 400
-
-def process_video(input_path, output_path, background_color="#FFFFFF", max_duration=MAX_VIDEO_DURATION):
+    # Process video file frame-by-frame for transparency
     cap = cv2.VideoCapture(input_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = frame_count / fps
-
-    # Check if video duration exceeds the limit
-    if duration > max_duration:
-        cap.release()
-        return False  # Video too long
-
-    # Define codec and create VideoWriter for output
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (int(cap.get(3)), int(cap.get(4))))
-
-    while cap.isOpened():
+    
+    for i in range(frame_count):
         ret, frame = cap.read()
         if not ret:
             break
-        
-        # Process frame for file-based request with background color
-        processed_frame = remove_background(frame, model, for_realtime=False, background_color=background_color)
-        out.write(processed_frame)
+
+        # Remove background with transparency if requested
+        processed_frame = remove_background(frame, model, transparent=transparent)
+
+        # Save as PNG with transparency (if applicable)
+        frame_output_path = os.path.join(output_dir, f"frame_{i:04d}.png")
+        cv2.imwrite(frame_output_path, processed_frame)
 
     cap.release()
-    out.release()
-    return True
-
-# WebSocket endpoint for real-time frame processing
-@socketio.on('process_frame')
-def handle_process_frame(data):
-    frame_data = data.get('frame')
-    width, height = data.get('width'), data.get('height')
     
-    # Decode and reshape the frame
-    frame = np.frombuffer(frame_data, np.uint8).reshape((height, width, 3))
-    
-    # Process the frame for real-time request without a background color
-    processed_frame = remove_background(frame, model, for_realtime=True)
+    # Convert PNG sequence to MOV format with transparency
+    output_video_path = os.path.join('output', 'output_video_with_transparency.mov')
+    os.system(f"ffmpeg -framerate {fps} -i {output_dir}/frame_%04d.png -c:v prores_ks -profile:v 4 {output_video_path}")
 
-    # Encode and send the processed frame back to the client
-    _, buffer = cv2.imencode('.jpg', processed_frame)
-    emit('processed_frame', buffer.tobytes())
-
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT') or 34565))
+    # Return the MOV file to the client
+    return send_from_directory(directory='output', filename='output_video_with_transparency.mov')
