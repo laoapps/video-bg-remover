@@ -19,4 +19,4 @@ COPY app/ /app
 EXPOSE 5000
 
 # Start Gunicorn with Flask-SocketIO for WebSocket support
-CMD ["gunicorn", "-w", "2", "-k", "eventlet", "-b", "0.0.0.0:5000", "main:app"]
+CMD ["gunicorn", "-w", "2", "-k", "eventlet", "-b", "0.0.0.0:34565", "main:app"]
