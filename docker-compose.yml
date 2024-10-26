@@ -11,5 +11,6 @@ services:
       - ./output:/app/output
     environment:
       - PYTHONUNBUFFERED=1
+      - PORT=34565
     ports:
-      - "5000:5000"
+      - "34565:34565"
