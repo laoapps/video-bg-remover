@@ -14,14 +14,15 @@ def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-def remove_background(frame, model, for_realtime=False, background_color="#FFFFFF"):
+def remove_background(frame, model, for_realtime=False, transparent=False, background_color="#FFFFFF"):
     """
-    Remove the background from the frame.
+    Remove the background from the frame with options for transparency or color.
 
     Parameters:
     - frame: The input frame to process.
     - model: The background removal model.
     - for_realtime: If True, keep only the masked foreground (no background).
+    - transparent: If True, output will include a transparent background.
     - background_color: Hex color code for the background, default is white.
 
     Returns:
@@ -42,20 +43,30 @@ def remove_background(frame, model, for_realtime=False, background_color="#FFFFF
     
     # Create binary mask
     binary_mask = (mask[:, :, 0] > 0.5).astype(np.uint8) * 255
-    
-    # If real-time, return only the masked foreground without a background
+
+    # If real-time, return masked foreground only (no background)
     if for_realtime:
         result = cv2.bitwise_and(frame, frame, mask=binary_mask)
         return result
+
+    # For file-based processing with transparency
+    if transparent:
+        # Split the original frame into RGB channels
+        b_channel, g_channel, r_channel = cv2.split(frame)
+        # Use binary mask as the alpha channel
+        alpha_channel = binary_mask
+        # Merge channels to create an RGBA image with transparency
+        result = cv2.merge((b_channel, g_channel, r_channel, alpha_channel))
+    else:
+        # File-based processing with a solid color background
+        bg_color_rgb = hex_to_rgb(background_color) if background_color else (255, 255, 255)
+        background_img = np.full((original_height, original_width, 3), bg_color_rgb, dtype=np.uint8)
+        
+        # Apply mask to create foreground and combine with background
+        fg_mask = cv2.bitwise_and(frame, frame, mask=binary_mask)
+        bg_mask = cv2.bitwise_and(background_img, background_img, mask=cv2.bitwise_not(binary_mask))
+        
+        # Combine foreground and background
+        result = cv2.add(fg_mask, bg_mask)
     
-    # File-based processing: Create a solid color background
-    bg_color_rgb = hex_to_rgb(background_color) if background_color else (255, 255, 255)
-    background_img = np.full((original_height, original_width, 3), bg_color_rgb, dtype=np.uint8)
-    
-    # Apply mask to create foreground and combine with background
-    fg_mask = cv2.bitwise_and(frame, frame, mask=binary_mask)
-    bg_mask = cv2.bitwise_and(background_img, background_img, mask=cv2.bitwise_not(binary_mask))
-    
-    # Combine foreground and background
-    result = cv2.add(fg_mask, bg_mask)
     return result
